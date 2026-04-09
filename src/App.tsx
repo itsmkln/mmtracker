@@ -60,6 +60,8 @@ function App() {
     if (password === data.value) {
       setIsAuthorized(true);
       localStorage.setItem('mcd_auth', 'true');
+      // Heartbeat trigger
+      await supabase.from('secrets').upsert({ name: 'last_active', value: new Date().toISOString() });
     } else {
       alert('Błędne hasło!');
     }
@@ -72,7 +74,12 @@ function App() {
       return;
     }
     const { error } = await supabase.from('trips').insert([{ driver }]);
-    if (error) alert('Błąd bazy: ' + error.message);
+    if (error) {
+      alert('Błąd bazy: ' + error.message);
+    } else {
+      // Refresh heartbeat on activity too
+      await supabase.from('secrets').upsert({ name: 'last_activity', value: new Date().toISOString() });
+    }
   };
 
   const deleteTrip = async (id: string) => {
@@ -115,20 +122,20 @@ function App() {
     });
   };
 
-  if (loading) return <div className="loading">Ładowanie...</div>;
+  if (loading) return <div className="loading">Wchodzę do garażu...</div>;
 
   if (!isAuthorized) {
     return (
       <div className="app-container auth-screen">
         <div className="card">
           <Lock size={48} className="auth-icon" />
-          <h2>Podaj hasło</h2>
+          <h2>Zaloguj się</h2>
           <form onSubmit={handleLogin}>
             <input 
               type="password" 
               value={password} 
               onChange={(e) => setPassword(e.target.value)} 
-              placeholder="Hasło..."
+              placeholder="Hasło dostępowe"
               autoFocus
             />
             <button type="submit" className="maciej-btn">Odblokuj</button>
@@ -141,12 +148,14 @@ function App() {
   const canUndo = (createdAt: string) => {
     const tripTime = new Date(createdAt).getTime();
     const now = new Date().getTime();
-    const diffInMinutes = (now - tripTime) / (1000 * 60);
-    return diffInMinutes <= 15;
+    const diffInHours = (now - tripTime) / (1000 * 60 * 60);
+    return diffInHours <= 12; // Zmienione na 12 godzin
   };
 
   const nextPerson = getNextTurn();
   const limitReached = tripsToday.length >= 2;
+  const today = new Date();
+  const isCurrentMonth = currentMonth.getMonth() === today.getMonth() && currentMonth.getFullYear() === today.getFullYear();
 
   return (
     <div className="app-container">
@@ -156,8 +165,8 @@ function App() {
 
       <div className="card main-card">
         <div className="next-turn-box">
-          <div className="next-label">TERAZ KOLEJ</div>
-          <div className="next-name">{nextPerson}</div>
+          <div className="next-label">TERAZ KOLEJ NA:</div>
+          <div className={`next-name ${nextPerson.toLowerCase()}`}>{nextPerson}</div>
         </div>
 
         <div className="registration-section">
@@ -168,7 +177,7 @@ function App() {
           {limitReached ? (
             <div className="limit-msg">
               <AlertCircle size={20} />
-              <span>Dziś odbyły się już 2 wyjazdy.</span>
+              <span>Zrobiliście już oba wyjazdy!</span>
             </div>
           ) : (
             <div className="actions main-actions">
@@ -176,14 +185,14 @@ function App() {
               <button className="michal-btn" onClick={() => addTrip('Michał')}>Michał</button>
             </div>
           )}
-          <div className="daily-counter">Wyjazdy dzisiaj: {tripsToday.length} / 2</div>
+          <div className="daily-counter">Dzisiaj: <strong>{tripsToday.length}</strong> / 2</div>
         </div>
 
         <button 
           className="calendar-toggle"
           onClick={() => setIsCalendarOpen(!isCalendarOpen)}
         >
-          {isCalendarOpen ? 'Ukryj kalendarz' : 'Pokaż kalendarz wyjazdów'}
+          {isCalendarOpen ? 'Ukryj kalendarz' : 'Widok kalendarza'}
         </button>
 
         {isCalendarOpen && (
@@ -195,13 +204,14 @@ function App() {
             </div>
             
             <div className="calendar-grid">
-              {['Pn', 'Wt', 'Śr', 'Czw', 'Pt', 'Sb', 'Nd'].map(d => <div key={d} className="weekday">{d}</div>)}
+              {['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'].map(d => <div key={d} className="weekday">{d}</div>)}
               {emptyDays.map(i => <div key={`e-${i}`} className="day empty"></div>)}
               {daysArray.map(day => {
                 const dayTrips = getTripsForDay(day);
+                const isToday = isCurrentMonth && day === today.getDate();
                 return (
-                  <div key={day} className="day">
-                    {day}
+                  <div key={day} className={`day ${isToday ? 'today' : ''}`}>
+                    <span className="day-number">{day}</span>
                     <div className="dots">
                       {dayTrips.map(t => (
                         <div key={t.id} className={`dot ${t.driver === 'Maciej' ? 'blue' : 'yellow'}`}></div>
@@ -213,29 +223,35 @@ function App() {
             </div>
             <div className="legend">
               <span className="legend-item"><div className="dot blue"></div> Maciej</span>
-              <span className="legend-item"><div className="dot yellow) "></div> Michał</span>
+              <span className="legend-item"><div className="dot yellow"></div> Michał</span>
             </div>
           </div>
         )}
 
         <div className="history">
-          <h3><History size={14} /> Historia:</h3>
+          <h3><History size={14} /> Ostatnie wyjazdy:</h3>
           <div className="history-list">
-            {trips.slice(0, 3).map((trip, index) => (
+            {trips.slice(0, 5).map((trip, index) => (
               <div key={trip.id} className="history-item">
-                <span className="history-name-box">
-                  <User size={12} /> {trip.driver}
-                  {index === 0 && canUndo(trip.created_at) && (
-                    <button 
-                      className="undo-btn" 
-                      onClick={() => deleteTrip(trip.id)}
-                      title="Cofnij ten wyjazd"
-                    >
-                      <Trash2 size={14} /> Cofnij
-                    </button>
-                  )}
-                </span>
-                <span className="history-date">{new Date(trip.created_at).toLocaleDateString('pl-PL', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</span>
+                <div className="history-main-info">
+                  <div className="history-name-box">
+                    <User size={12} /> 
+                    <span className={trip.driver.toLowerCase()}>{trip.driver}</span>
+                  </div>
+                  <span className="history-date">
+                    {new Date(trip.created_at).toLocaleDateString('pl-PL', {day:'2-digit', month:'2-digit'})}
+                    {' '}{new Date(trip.created_at).toLocaleTimeString('pl-PL', {hour:'2-digit', minute:'2-digit'})}
+                  </span>
+                </div>
+                {index === 0 && canUndo(trip.created_at) && (
+                  <button 
+                    className="undo-btn" 
+                    onClick={() => deleteTrip(trip.id)}
+                    title="Cofnij ten wyjazd"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
