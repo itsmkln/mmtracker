@@ -60,8 +60,12 @@ function App() {
     if (password === data.value) {
       setIsAuthorized(true);
       localStorage.setItem('mcd_auth', 'true');
-      // Heartbeat trigger
-      await supabase.from('secrets').upsert({ name: 'last_active', value: new Date().toISOString() });
+      
+      // Heartbeat: Log login activity to prevent Supabase pausing
+      await supabase.from('activity_log').insert([{ 
+        event_type: 'login', 
+        user_agent: navigator.userAgent 
+      }]);
     } else {
       alert('Błędne hasło!');
     }
@@ -77,8 +81,11 @@ function App() {
     if (error) {
       alert('Błąd bazy: ' + error.message);
     } else {
-      // Refresh heartbeat on activity too
-      await supabase.from('secrets').upsert({ name: 'last_activity', value: new Date().toISOString() });
+      // Heartbeat: Log trip addition activity
+      await supabase.from('activity_log').insert([{ 
+        event_type: `trip_added_${driver.toLowerCase()}`, 
+        user_agent: navigator.userAgent 
+      }]);
     }
   };
 
