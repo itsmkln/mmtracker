@@ -36,15 +36,29 @@ function App() {
   useEffect(() => {
     fetchTrips();
     
-    // Automatic heartbeat for already authorized users
-    if (isAuthorized) {
-      supabase.from('activity_log').insert([{ 
-        event_type: 'page_visit', 
-        user_agent: navigator.userAgent 
-      }]).then(({ error }) => {
-        if (error) console.error('Heartbeat error:', error);
-      });
-    }
+    // Automatic heartbeat for already authorized users with IP tracking
+    const recordVisit = async () => {
+      if (isAuthorized) {
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          const { ip } = await ipRes.json();
+          
+          await supabase.from('activity_log').insert([{ 
+            event_type: 'page_visit', 
+            user_agent: navigator.userAgent,
+            ip_address: ip
+          }]);
+        } catch (err) {
+          // Fallback without IP if API fails
+          await supabase.from('activity_log').insert([{ 
+            event_type: 'page_visit', 
+            user_agent: navigator.userAgent 
+          }]);
+        }
+      }
+    };
+
+    recordVisit();
 
     const channel = supabase.channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => fetchTrips())
@@ -72,10 +86,14 @@ function App() {
       setIsAuthorized(true);
       localStorage.setItem('mcd_auth', 'true');
       
-      // Heartbeat: Log login activity to prevent Supabase pausing
+      // Heartbeat with IP
+      let ip = '';
+      try { const res = await fetch('https://api.ipify.org?format=json'); ip = (await res.json()).ip; } catch(e) {}
+
       await supabase.from('activity_log').insert([{ 
         event_type: 'login', 
-        user_agent: navigator.userAgent 
+        user_agent: navigator.userAgent,
+        ip_address: ip
       }]);
     } else {
       alert('Błędne hasło!');
@@ -92,10 +110,14 @@ function App() {
     if (error) {
       alert('Błąd bazy: ' + error.message);
     } else {
-      // Heartbeat: Log trip addition activity
+      // Heartbeat with IP
+      let ip = '';
+      try { const res = await fetch('https://api.ipify.org?format=json'); ip = (await res.json()).ip; } catch(e) {}
+
       await supabase.from('activity_log').insert([{ 
         event_type: `trip_added_${driver.toLowerCase()}`, 
-        user_agent: navigator.userAgent 
+        user_agent: navigator.userAgent,
+        ip_address: ip
       }]);
     }
   };
