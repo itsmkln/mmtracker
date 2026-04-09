@@ -35,6 +35,17 @@ function App() {
 
   useEffect(() => {
     fetchTrips();
+    
+    // Automatic heartbeat for already authorized users
+    if (isAuthorized) {
+      supabase.from('activity_log').insert([{ 
+        event_type: 'page_visit', 
+        user_agent: navigator.userAgent 
+      }]).then(({ error }) => {
+        if (error) console.error('Heartbeat error:', error);
+      });
+    }
+
     const channel = supabase.channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => fetchTrips())
       .subscribe();
